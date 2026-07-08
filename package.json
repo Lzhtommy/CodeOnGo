@@ -3,20 +3,25 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "expo": "~57.0.2",
-    "expo-status-bar": "~57.0.0",
-    "react": "19.2.3",
-    "react-native": "0.86.0"
+    "@anthropic-ai/sdk": "^0.110.0",
+    "expo": "^55.0.27",
+    "expo-secure-store": "~55.0.15",
+    "expo-status-bar": "~55.0.6",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~5.9.2"
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "spike": "node scripts/spike.mjs"
   },
   "private": true
 }
