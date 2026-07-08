@@ -15,6 +15,23 @@ export type SessionEvent = any;
 
 export type TurnOutcome = 'idle' | 'terminated' | 'dropped';
 
+export interface SessionSummary {
+  id: string;
+  title: string | null;
+  status: 'rescheduling' | 'running' | 'idle' | 'terminated';
+  updatedAt: string;
+}
+
+export async function listSessions(client: Anthropic): Promise<SessionSummary[]> {
+  const sessions: SessionSummary[] = [];
+  for await (const s of await client.beta.sessions.list()) {
+    if (s.archived_at) continue;
+    sessions.push({ id: s.id, title: s.title, status: s.status, updatedAt: s.updated_at });
+  }
+  sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return sessions;
+}
+
 export async function createBlankSession(
   client: Anthropic,
   agentId: string,
@@ -25,6 +42,36 @@ export async function createBlankSession(
     agent: agentId, // 字符串简写 → 永远用 agent 最新版本
     environment_id: environmentId,
     title,
+  });
+  return session.id;
+}
+
+export interface RepoMount {
+  fullName: string; // owner/name
+  defaultBranch: string;
+}
+
+/** 仓库模式 session：github_repository resource 挂载（创建会阻塞到 clone 完成） */
+export async function createRepoSession(
+  client: Anthropic,
+  agentId: string,
+  environmentId: string,
+  repo: RepoMount,
+  githubToken: string,
+  title: string,
+): Promise<string> {
+  const session = await client.beta.sessions.create({
+    agent: agentId,
+    environment_id: environmentId,
+    title,
+    resources: [
+      {
+        type: 'github_repository',
+        url: `https://github.com/${repo.fullName}`,
+        authorization_token: githubToken,
+        checkout: { type: 'branch', name: repo.defaultBranch },
+      },
+    ],
   });
   return session.id;
 }
@@ -90,24 +137,23 @@ export async function consumeUntilSettled(opts: ConsumeOptions): Promise<TurnOut
   return 'dropped';
 }
 
-/**
- * 跑一轮：stream-first 发消息，断流自动重连（consolidation 保证不丢事件），
- * 直到 session 落到真正的 idle/terminated。
- */
-export async function runTurn(
-  opts: Omit<ConsumeOptions, 'afterStreamOpen'> & { text: string; maxReconnects?: number },
+async function consumeWithReconnect(
+  opts: Omit<ConsumeOptions, 'afterStreamOpen'> & {
+    maxReconnects?: number;
+    onFirstStreamOpen?: () => Promise<void>;
+  },
 ): Promise<TurnOutcome> {
   const maxReconnects = opts.maxReconnects ?? 5;
-  let kickoffSent = false;
+  let firstOpenDone = false;
 
   for (let attempt = 0; attempt <= maxReconnects; attempt++) {
     try {
       const outcome = await consumeUntilSettled({
         ...opts,
         afterStreamOpen: async () => {
-          if (!kickoffSent) {
-            kickoffSent = true;
-            await sendUserMessage(opts.client, opts.sessionId, opts.text);
+          if (!firstOpenDone) {
+            firstOpenDone = true;
+            await opts.onFirstStreamOpen?.();
           }
         },
       });
@@ -119,4 +165,40 @@ export async function runTurn(
     }
   }
   return 'dropped';
+}
+
+/**
+ * 跑一轮：stream-first 发消息，断流自动重连（consolidation 保证不丢事件），
+ * 直到 session 落到真正的 idle/terminated。
+ */
+export async function runTurn(
+  opts: Omit<ConsumeOptions, 'afterStreamOpen'> & { text: string; maxReconnects?: number },
+): Promise<TurnOutcome> {
+  return consumeWithReconnect({
+    ...opts,
+    onFirstStreamOpen: () => sendUserMessage(opts.client, opts.sessionId, opts.text),
+  });
+}
+
+/**
+ * 只挂上去消费不发消息：用于打开历史 session（补历史）与回前台恢复。
+ * running 的 session 会一直消费到落 idle；本就 idle 的 session 补完历史即返回。
+ */
+export async function attachSession(
+  opts: Omit<ConsumeOptions, 'afterStreamOpen'> & { maxReconnects?: number },
+): Promise<TurnOutcome> {
+  const status = (await opts.client.beta.sessions.retrieve(opts.sessionId)).status;
+
+  // 非运行态：只补历史，不必挂流等待
+  if (status !== 'running' && status !== 'rescheduling') {
+    for await (const ev of opts.client.beta.sessions.events.list(opts.sessionId)) {
+      if (ev.id && !opts.seen.has(ev.id)) {
+        opts.seen.add(ev.id);
+        opts.onEvent(ev);
+      }
+    }
+    return status === 'terminated' ? 'terminated' : 'idle';
+  }
+
+  return consumeWithReconnect(opts);
 }

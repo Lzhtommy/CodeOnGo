@@ -24,6 +24,9 @@
     },
     "plugins": [
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "githubClientId": ""
+    }
   }
 }

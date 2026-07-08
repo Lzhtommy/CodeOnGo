@@ -36,6 +36,13 @@
 - BYOK 要求用户已有 Anthropic API key，获客漏斗窄（Phase 2 解决）。
 - iOS 后台会杀 SSE 长连接，恢复逻辑（consolidation）是体验生命线，需重点真机测试。
 
+## MVP 状态（2026-07-08，issues #1-#9 完成）
+
+- 全部 9 个 MVP issue 已实现：session 列表/续聊、后台恢复、GitHub 连接（PAT 可用，Device Flow 代码就绪待 client_id）、仓库挂载、产物桥、diff 查看器、WebView 预览、代开 PR、自定义指令。
+- API 级端到端验证：`scripts/verify-issues.mjs`（真实跑 outputs 桥、仓库挂载、push 检测、diff 解析、PR 创建+清理）。
+- 验证中抓到并修复：files.list 索引是逐文件异步出现的，"非空即返回"会漏文件——已改为轮询到数量稳定（src/lib/outputs.ts）。
+- 待人工：GitHub OAuth App 注册（client_id 填入 app.json extra.githubClientId 即启用 Device Flow）；真机 UI 走查。
+
 ## Spike 状态（已验证）
 
 - `@anthropic-ai/sdk@0.110.0` 含完整 Managed Agents beta 命名空间。
